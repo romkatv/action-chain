@@ -1,5 +1,3 @@
-// Copyright (c) 2018 Roman Perepelitsa.
-
 #include "action_chain.h"
 
 #include <stddef.h>
