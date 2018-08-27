@@ -1,5 +1,3 @@
-// Copyright (c) 2018 Roman Perepelitsa.
-//
 // TODO: Figure out whether memory order constraints can be relaxed.
 
 #ifndef ROMKATV_ACTION_CHAIN_ACTION_CHAIN_H_
