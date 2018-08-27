@@ -20,27 +20,8 @@ namespace romkatv {
 class ActionChain {
  public:
   ActionChain() { tail_.load()->Run(); }
-
+  ~ActionChain() { tail_.load()->Destroy(); }
   ActionChain(ActionChain&&) = delete;
-
-  ~ActionChain() {
-    return;
-    std::mutex m;
-    std::condition_variable c;
-    bool done = false;
-    Add([&] {
-      std::lock_guard lock(m);
-      done = true;
-      c.notify_one();
-    });
-    {
-      std::unique_lock lock(m);
-      c.wait(lock, [&] { return done; });
-    }
-    Work* w = tail_.load();
-    w->Wait();
-    w->Destroy();
-  }
 
   // Either executes `action` synchronously (in which case some other actions added
   // concurrently by other threads may also run synchronously after `f` returns)
@@ -67,10 +48,6 @@ class ActionChain {
       w->invoke_ = &Work::Invoke<D>;
       new (Align(p + sizeof(Work), alignof(D))) D(std::forward<F>(f));
       return w;
-    }
-
-    void Wait() {
-      while (!next_.load(std::memory_order_acquire)) std::this_thread::yield();
     }
 
     void Destroy() {
