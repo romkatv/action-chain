@@ -69,7 +69,7 @@ class ActionChain {
     void Run() {
       Work* w = this;
       while (true) {
-        (w->*w->invoke_)();
+        (w->invoke_)(w);
         // Invariant: w->_next is not sealed.
         if (Work* next = w->next_.exchange(Sealed(), std::memory_order_acq_rel)) {
           assert(next != Sealed());
@@ -96,20 +96,20 @@ class ActionChain {
     static size_t AllocSize() {
       constexpr size_t S = std::max(sizeof(F), sizeof(size_t));
       constexpr size_t A = std::max(alignof(F), alignof(size_t));
-      size_t pad = A > alignof(Work) ? A - alignof(Work) : 0;
-      return sizeof(Work) + pad + S;
+      constexpr size_t P = A > alignof(Work) ? A - alignof(Work) : 0;
+      return sizeof(Work) + P + S;
     }
 
     template <class F>
-    void Invoke() {
-      F* f = Trailer<F>();
+    static void Invoke(Work* w) {
+      F* f = w->Trailer<F>();
       std::move (*f)();
       f->~F();
-      *Trailer<size_t>() = AllocSize<F>();
+      *w->Trailer<size_t>() = AllocSize<F>();
     }
 
     std::atomic<Work*> next_{nullptr};
-    void (Work::*invoke_)();
+    void (*invoke_)(Work*);
   };
 
   std::atomic<Work*> tail_{Work::New([] {})};
