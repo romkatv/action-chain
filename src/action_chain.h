@@ -11,6 +11,7 @@
 #include <cassert>
 #include <condition_variable>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <type_traits>
 #include <utility>
