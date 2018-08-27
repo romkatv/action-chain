@@ -41,19 +41,21 @@ class ActionChain {
     template <class F>
     static Work* New(F&& f) {
       using D = std::decay_t<F>;
-      size_t pad = alignof(D) > alignof(Work) ? alignof(D) - alignof(Work) : 0;
-      char* p = new char[sizeof(Work) + pad + sizeof(D)];
+      constexpr size_t S = std::max(sizeof(D), sizeof(size_t));
+      constexpr size_t A = std::max(alignof(D), alignof(size_t));
+      size_t pad = A > alignof(Work) ? A - alignof(Work) : 0;
+      void* p = ::operator new(sizeof(Work) + pad + S);
       assert(reinterpret_cast<uintptr_t>(p) % alignof(Work) == 0);
       Work* w = new (p) Work;
       w->invoke_ = &Work::Invoke<D>;
-      new (Align(p + sizeof(Work), alignof(D))) D(std::forward<F>(f));
+      new (w->Trailer<D>()) D(std::forward<F>(f));
       return w;
     }
 
     void Destroy() {
-      char* p = reinterpret_cast<char*>(this);
+      size_t size = *Trailer<size_t>();
       this->~Work();
-      delete[] p;
+      ::operator delete(this, size);
     }
 
     // Called at most once.
@@ -88,17 +90,18 @@ class ActionChain {
 
     static Work* Sealed() { return reinterpret_cast<Work*>(alignof(Work)); }
 
-    static void* Align(void* p, size_t alignment) {
-      uintptr_t n = reinterpret_cast<uintptr_t>(p);
-      return reinterpret_cast<void*>(n + (-n & (alignment - 1)));
+    template <class T>
+    T* Trailer() {
+      uintptr_t n = reinterpret_cast<uintptr_t>(this) + sizeof(Work);
+      return reinterpret_cast<T*>(n + (-n & (alignof(T) - 1)));
     }
 
     template <class F>
     void Invoke() {
-      void* p = Align(reinterpret_cast<char*>(this) + sizeof(Work), alignof(F));
-      auto* f = static_cast<F*>(p);
+      F* f = Trailer<F>();
       std::move (*f)();
       f->~F();
+      *Trailer<size_t>() = sizeof(F);
     }
 
     std::atomic<Work*> next_{nullptr};
