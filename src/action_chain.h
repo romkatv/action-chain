@@ -42,10 +42,7 @@ class ActionChain {
     template <class F>
     static Work* New(F&& f) {
       using D = std::decay_t<F>;
-      constexpr size_t S = std::max(sizeof(D), sizeof(size_t));
-      constexpr size_t A = std::max(alignof(D), alignof(size_t));
-      size_t pad = A > alignof(Work) ? A - alignof(Work) : 0;
-      void* p = ::operator new(sizeof(Work) + pad + S);
+      void* p = ::operator new(AllocSize<F>());
       assert(reinterpret_cast<uintptr_t>(p) % alignof(Work) == 0);
       Work* w = new (p) Work;
       w->invoke_ = &Work::Invoke<D>;
@@ -98,11 +95,19 @@ class ActionChain {
     }
 
     template <class F>
+    static size_t AllocSize() {
+      constexpr size_t S = std::max(sizeof(F), sizeof(size_t));
+      constexpr size_t A = std::max(alignof(F), alignof(size_t));
+      size_t pad = A > alignof(Work) ? A - alignof(Work) : 0;
+      return sizeof(Work) + pad + S;
+    }
+
+    template <class F>
     void Invoke() {
       F* f = Trailer<F>();
       std::move (*f)();
       f->~F();
-      *Trailer<size_t>() = sizeof(F);
+      *Trailer<size_t>() = AllocSize<F>();
     }
 
     std::atomic<Work*> next_{nullptr};

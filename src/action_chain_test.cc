@@ -19,6 +19,7 @@ int main() {
   uint64_t counter = 0;
   auto start = std::chrono::high_resolution_clock::now();
   {
+    std::mutex m;
     romkatv::ActionChain action_chain;
     std::vector<std::thread> threads;
     for (size_t i = 0; i != kThreads; ++i) {
