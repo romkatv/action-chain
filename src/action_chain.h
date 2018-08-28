@@ -22,17 +22,14 @@ class ActionChain {
   class Mem {
    public:
     Mem() : p_(nullptr) {}
-    Mem(Mem&& other) : p_(other.p_) { other.p_ = nullptr; }
+    Mem(Mem&& other) : p_(other.Release()) {}
     ~Mem() {
       // This `if` has no effect on the semantics of the program but it does
       // make it faster.
       if (p_) ::operator delete(p_, kAllocSize);
     }
     Mem& operator=(Mem&& other) {
-      if (this != &other) {
-        p_ = other.p_;
-        other.p_ = nullptr;
-      }
+      p_ = other.Release();
       return *this;
     }
 
@@ -41,11 +38,7 @@ class ActionChain {
 
     explicit Mem(void* p) : p_(p) {}
 
-    void* Release() {
-      void* res = p_;
-      p_ = nullptr;
-      return res;
-    }
+    void* Release() { return std::exchange(p_, nullptr); }
 
     void* p_;
   };
@@ -64,16 +57,43 @@ class ActionChain {
   // completed.
   //
   // Actions are guaranteed to run in the same order they were added.
+  //
+  // By passing `mem` you allow Run() to reuse heap-allocated memory. It may speed
+  // things up. Note that Mem is not thread safe. You must not pass the same instance
+  // of Mem concurrently to multiple Run() calls.
+  //
+  // Example:
+  //
+  //   // These counters are updated atomically after every request.
+  //   uint64_t total_requests = 0;
+  //   uint64_t failed_requests = 0;
+  //   ActionChain mutex;
+  //
+  //   // Thread-safe.
+  //   void SendRequests(uint64_t n) {
+  //     ActionChain::Mem mem;
+  //     while (n--) {
+  //       bool ok = SendRequest();
+  //       // Note that the counters may be updated after SendRequest() returns.
+  //       mutex.Run(&mem, [=] {
+  //         ++total_requests;
+  //         if (!ok) ++failed_requests;
+  //       });
+  //     }
+  //   }
   template <class F>
-  Mem Run(Mem&& mem, F&& action) {
-    void* p = mem.p_ ? mem.Release() : ::operator new(kAllocSize);
-    Work* work = Work::New(p, std::forward<F>(action));
-    return Mem(tail_.exchange(work, std::memory_order_acq_rel)->ContinueWith(work));
+  void Run(Mem* mem, F&& action) {
+    assert(mem);
+    if (!mem->p_) mem->p_ = ::operator new(kAllocSize);
+    Work* work = Work::New(mem->p_, std::forward<F>(action));
+    mem->p_ = tail_.exchange(work, std::memory_order_acq_rel)->ContinueWith(work);
   }
 
   template <class F>
   Mem Run(F&& action) {
-    return Run(Mem(), std::move(action));
+    Mem mem;
+    Run(&mem, std::move(action));
+    return mem;
   }
 
  private:
@@ -101,6 +121,7 @@ class ActionChain {
     }
 
     // Called exactly once for every instance of Work except the very last one.
+    // Returns null or raw memory of kAllocSize bytes.
     void* ContinueWith(Work* next) {
       if (Work* w = next_.exchange(next, std::memory_order_acq_rel)) {
         static_cast<void>(w);

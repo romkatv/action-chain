@@ -61,6 +61,7 @@ struct Flags {
   std::string sync = "ActionChain";
   std::uint64_t threads = 1;
   std::uint64_t ops_per_action = 1;
+  // The default value is set in ParseFlags as it depends on other flags.
   std::uint64_t actions = 0;
 };
 
@@ -120,9 +121,8 @@ class ActionChainNoPooling {
   using Mem = int;
 
   template <class F>
-  Mem Run(Mem, F&& f) {
+  void Run(Mem*, F&& f) {
     action_chain_.Run(std::move(f));
-    return Mem();
   }
 
  private:
@@ -134,10 +134,9 @@ class CriticalSection {
   using Mem = int;
 
   template <class F>
-  Mem Run(Mem, F&& f) {
+  void Run(Mem*, F&& f) {
     std::lock_guard lock(mutex_);
     std::move(f)();
-    return Mem();
   }
 
  private:
@@ -149,9 +148,8 @@ class Unsynchronized {
   using Mem = int;
 
   template <class F>
-  Mem Run(Mem, F&& f) {
+  void Run(Mem*, F&& f) {
     std::move(f)();
-    return Mem();
   }
 };
 
@@ -196,9 +194,9 @@ int Benchmark(const Flags& flags) {
     std::vector<std::thread> threads;
     for (std::uint64_t i = 0; i != flags.threads; ++i) {
       threads.emplace_back([&] {
-        typename Sync::Mem mem = {};
+        typename Sync::Mem mem;
         for (std::uint64_t i = 0; i != actions_per_thread; ++i) {
-          mem = sync.Run(std::move(mem), [&] {
+          sync.Run(&mem, [&] {
             for (std::uint64_t j = 0; j != flags.ops_per_action; ++j) ++counter;
           });
         }
