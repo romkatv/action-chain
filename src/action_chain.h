@@ -1,11 +1,10 @@
 #ifndef ROMKATV_ACTION_CHAIN_ACTION_CHAIN_H_
 #define ROMKATV_ACTION_CHAIN_ACTION_CHAIN_H
 
-#include <stddef.h>
-
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
+#include <cstddef>
 #include <mutex>
 #include <new>
 #include <thread>
@@ -19,7 +18,7 @@ namespace romkatv {
 // TODO: Figure out whether memory order constraints can be relaxed.
 class ActionChain {
  public:
-  ActionChain() { tail_.load()->Run(); }
+  ActionChain() { Work::RunAll(tail_.load()); }
   ~ActionChain() { tail_.load()->Destroy(); }
   ActionChain(ActionChain&&) = delete;
 
@@ -40,9 +39,9 @@ class ActionChain {
    public:
     template <class F>
     static Work* New(F&& f) {
+      static_assert(alignof(F) <= alignof(std::max_align_t));
       using D = std::decay_t<F>;
-      void* p = ::operator new(AllocSize<F>());
-      assert(reinterpret_cast<uintptr_t>(p) % alignof(Work) == 0);
+      void* p = ::operator new(AllocSize<D>());
       Work* w = new (p) Work;
       w->invoke_ = &Work::Invoke<D>;
       new (w->Trailer<D>()) D(std::forward<F>(f));
@@ -64,46 +63,47 @@ class ActionChain {
         static_cast<void>(w);
         assert(w == Sealed());
         Destroy();
-        while ((next = next->Run())) {}
+        RunAll(next);
       }
     }
 
-    // Called exactly once.
-    Work* Run() {
-      invoke_(this);
-      Work* next = next_.exchange(Sealed(), std::memory_order_acq_rel);
-      if (next) {
-        assert(next != Sealed());
-        Destroy();
+    static void RunAll(Work* w) {
+      assert(w != nullptr && w != Sealed());
+      while (true) {
+        w->invoke_(w);
+        if (Work* next = w->next_.exchange(Sealed(), std::memory_order_acq_rel)) {
+          assert(next != Sealed());
+          w->Destroy();
+          w = next;
+        } else {
+          break;
+        }
       }
-      return next;
     }
 
    private:
     Work() {}
 
-    static Work* Sealed() { return reinterpret_cast<Work*>(alignof(Work)); }
+    static Work* Sealed() { return reinterpret_cast<Work*>(alignof(std::max_align_t)); }
+
+    static constexpr size_t Align(size_t n) { return n + (-n & (alignof(std::max_align_t) - 1)); }
 
     template <class T>
     T* Trailer() {
-      uintptr_t n = reinterpret_cast<uintptr_t>(this) + sizeof(Work);
-      return reinterpret_cast<T*>(n + (-n & (alignof(T) - 1)));
+      return reinterpret_cast<T*>(reinterpret_cast<char*>(this) + Align(sizeof(Work)));
     }
 
     template <class F>
     static constexpr size_t AllocSize() {
-      constexpr size_t S = std::max(sizeof(F), sizeof(size_t));
-      constexpr size_t A = std::max(alignof(F), alignof(size_t));
-      constexpr size_t P = A > alignof(Work) ? A - alignof(Work) : 0;
-      return sizeof(Work) + P + S;
+      return Align(sizeof(Work)) + Align(sizeof(F));
     }
 
     // Called exactly once.
     template <class F>
     static void Invoke(Work* w) {
-      F* f = w->Trailer<F>();
-      std::move(*f)();
-      f->~F();
+      F& f = *w->Trailer<F>();
+      std::move(f)();
+      f.~F();
       *w->Trailer<size_t>() = AllocSize<F>();
     }
 
