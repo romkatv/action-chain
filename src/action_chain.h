@@ -22,31 +22,24 @@ class ActionChain {
   class Mem {
    public:
     Mem() : p_(nullptr) {}
-    Mem(Mem&& other) : p_(other.Release()) {}
-    ~Mem() {
-      // This `if` has no effect on the semantics of the program but it does
-      // make it faster.
-      if (p_) ::operator delete(p_, kAllocSize);
-    }
+    Mem(Mem&& other) : p_(std::exchange(other.p_, nullptr)) {}
+    ~Mem() { ::operator delete(p_, kAllocSize); }
     Mem& operator=(Mem&& other) {
-      p_ = other.Release();
+      p_ = std::exchange(other.p_, nullptr);
       return *this;
     }
 
    private:
     friend class ActionChain;
-
     explicit Mem(void* p) : p_(p) {}
-
-    void* Release() { return std::exchange(p_, nullptr); }
 
     void* p_;
   };
 
-  ActionChain() { Work::RunAll(tail_.load()); }
+  ActionChain() { Work::RunAll(tail_.load(std::memory_order_relaxed)); }
   ActionChain(ActionChain&&) = delete;
   ~ActionChain() {
-    Work* p = tail_.load();
+    Work* p = tail_.load(std::memory_order_acquire);
     p->Destroy();
     ::operator delete(p, kAllocSize);
   }
