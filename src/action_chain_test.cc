@@ -12,7 +12,10 @@
 //
 // Synchronization primitives:
 //
-//   ActionChain           ActionChain class from this library
+//   ActionChain           ActionChain class from this library with explicit Mem
+//                         passing by the caller
+//   ActionChainNoPooling  ActionChain class from this library without explicit
+//                         Mem passing by the caller
 //   CriticalSection       regular mutex
 //   Unsynchronized        no synchronization; set --threads=1 when you use this
 //
@@ -112,12 +115,29 @@ Flags ParseFlags(const char* const* begin, const char* const* end) {
   return res;
 }
 
+class ActionChainNoPooling {
+ public:
+  using Mem = int;
+
+  template <class F>
+  Mem Run(Mem, F&& f) {
+    action_chain_.Run(std::move(f));
+    return Mem();
+  }
+
+ private:
+  ActionChain action_chain_;
+};
+
 class CriticalSection {
  public:
+  using Mem = int;
+
   template <class F>
-  void Run(F&& f) {
+  Mem Run(Mem, F&& f) {
     std::lock_guard lock(mutex_);
     std::move(f)();
+    return Mem();
   }
 
  private:
@@ -126,9 +146,12 @@ class CriticalSection {
 
 class Unsynchronized {
  public:
+  using Mem = int;
+
   template <class F>
-  void Run(F&& f) {
+  Mem Run(Mem, F&& f) {
     std::move(f)();
+    return Mem();
   }
 };
 
@@ -173,8 +196,9 @@ int Benchmark(const Flags& flags) {
     std::vector<std::thread> threads;
     for (std::uint64_t i = 0; i != flags.threads; ++i) {
       threads.emplace_back([&] {
+        typename Sync::Mem mem = {};
         for (std::uint64_t i = 0; i != actions_per_thread; ++i) {
-          sync.Run([&] {
+          mem = sync.Run(std::move(mem), [&] {
             for (std::uint64_t j = 0; j != flags.ops_per_action; ++j) ++counter;
           });
         }
@@ -202,23 +226,19 @@ int Benchmark(const Flags& flags) {
   return 0;
 }
 
-}  // namespace
-}  // namespace romkatv
-
-int main(int argc, char* argv[]) {
-  using romkatv::ActionChain;
-  using romkatv::Benchmark;
-  using romkatv::CriticalSection;
-  using romkatv::Flags;
-  using romkatv::ParseFlags;
-  using romkatv::Unsynchronized;
-
+int BenchmarkMain(int argc, char* argv[]) {
   Flags flags = ParseFlags(argv + 1, argv + argc);
   std::unordered_map<std::string, int (*)(const Flags&)> bm = {
       {"ActionChain", Benchmark<ActionChain>},
+      {"ActionChainNoPooling", Benchmark<ActionChainNoPooling>},
       {"CriticalSection", Benchmark<CriticalSection>},
       {"Unsynchronized", Benchmark<Unsynchronized>},
   };
   CHECK(bm[flags.sync]);
   return bm[flags.sync](flags);
 }
+
+}  // namespace
+}  // namespace romkatv
+
+int main(int argc, char* argv[]) { return romkatv::BenchmarkMain(argc, argv); }

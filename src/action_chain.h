@@ -1,6 +1,7 @@
 #ifndef ROMKATV_ACTION_CHAIN_ACTION_CHAIN_H_
 #define ROMKATV_ACTION_CHAIN_ACTION_CHAIN_H
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -18,9 +19,44 @@ namespace romkatv {
 // TODO: Figure out whether memory order constraints can be relaxed.
 class ActionChain {
  public:
+  class Mem {
+   public:
+    Mem() : p_(nullptr) {}
+    Mem(Mem&& other) : p_(other.p_) { other.p_ = nullptr; }
+    ~Mem() {
+      // This `if` has no effect on the semantics of the program but it does
+      // make it faster.
+      if (p_) ::operator delete(p_, kAllocSize);
+    }
+    Mem& operator=(Mem&& other) {
+      if (this != &other) {
+        p_ = other.p_;
+        other.p_ = nullptr;
+      }
+      return *this;
+    }
+
+   private:
+    friend class ActionChain;
+
+    explicit Mem(void* p) : p_(p) {}
+
+    void* Release() {
+      void* res = p_;
+      p_ = nullptr;
+      return res;
+    }
+
+    void* p_;
+  };
+
   ActionChain() { Work::RunAll(tail_.load()); }
-  ~ActionChain() { tail_.load()->Destroy(); }
   ActionChain(ActionChain&&) = delete;
+  ~ActionChain() {
+    Work* p = tail_.load();
+    p->Destroy();
+    ::operator delete(p, kAllocSize);
+  }
 
   // Either executes `action` synchronously (in which case some other actions added
   // concurrently by other threads may also run synchronously after `f` returns)
@@ -29,44 +65,55 @@ class ActionChain {
   //
   // Actions are guaranteed to run in the same order they were added.
   template <class F>
-  void Run(F&& action) {
-    Work* work = Work::New(std::forward<F>(action));
-    tail_.exchange(work, std::memory_order_acq_rel)->ContinueWith(work);
+  Mem Run(Mem&& mem, F&& action) {
+    void* p = mem.p_ ? mem.Release() : ::operator new(kAllocSize);
+    Work* work = Work::New(p, std::forward<F>(action));
+    return Mem(tail_.exchange(work, std::memory_order_acq_rel)->ContinueWith(work));
+  }
+
+  template <class F>
+  Mem Run(F&& action) {
+    return Run(Mem(), std::move(action));
   }
 
  private:
+  static constexpr std::size_t kAllocSize = 64;
+
   class Work {
    public:
     template <class F>
-    static Work* New(F&& f) {
-      static_assert(alignof(F) <= alignof(std::max_align_t));
-      using D = std::decay_t<F>;
-      void* p = ::operator new(AllocSize<D>());
+    static Work* New(void* p, F&& f) {
+      // This is easy to fix with no adverse effects for the code that currently
+      // compiles.
+      static_assert(alignof(F) <= alignof(Work), "Sorry, not implemented");
+      // This might be a bit trickier to fix without slowing down existing code.
+      static_assert(sizeof(Work) + sizeof(F) <= kAllocSize);
       Work* w = new (p) Work;
-      w->invoke_ = &Work::Invoke<D>;
-      new (w->Trailer<D>()) D(std::forward<F>(f));
+      w->invoke_ = &Work::Invoke<std::decay_t<F>>;
+      new (w + 1) std::decay_t<F>(std::forward<F>(f));
       return w;
     }
 
     // Called exactly once.
     void Destroy() {
       assert(next_.load(std::memory_order_relaxed) == Sealed());
-      std::size_t size = *Trailer<std::size_t>();
       this->~Work();
-      ::operator delete(this, size);
     }
 
     // Called exactly once for every instance of Work except the very last one.
-    void ContinueWith(Work* next) {
-      // Invariant: _next is either null or sealed.
+    void* ContinueWith(Work* next) {
       if (Work* w = next_.exchange(next, std::memory_order_acq_rel)) {
         static_cast<void>(w);
         assert(w == Sealed());
         Destroy();
         RunAll(next);
+        return this;
       }
+      return nullptr;
     }
 
+    // TODO: Move the loop into an out-of-line function and leave only the hot path
+    // in there.
     static void RunAll(Work* w) {
       assert(w != nullptr && w != Sealed());
       while (true) {
@@ -84,36 +131,21 @@ class ActionChain {
    private:
     Work() {}
 
-    static Work* Sealed() { return reinterpret_cast<Work*>(alignof(std::max_align_t)); }
-
-    static constexpr std::size_t Align(std::size_t n) {
-      return n + (-n & (alignof(std::max_align_t) - 1));
-    }
-
-    template <class T>
-    T* Trailer() {
-      return reinterpret_cast<T*>(reinterpret_cast<char*>(this) + Align(sizeof(Work)));
-    }
-
-    template <class F>
-    static constexpr std::size_t AllocSize() {
-      return Align(sizeof(Work)) + Align(sizeof(F));
-    }
+    static Work* Sealed() { return reinterpret_cast<Work*>(alignof(Work)); }
 
     // Called exactly once.
     template <class F>
     static void Invoke(Work* w) {
-      F& f = *w->Trailer<F>();
+      F& f = *reinterpret_cast<F*>(w + 1);
       std::move(f)();
       f.~F();
-      *w->Trailer<std::size_t>() = AllocSize<F>();
     }
 
     std::atomic<Work*> next_{nullptr};
     void (*invoke_)(Work*);
   };
 
-  std::atomic<Work*> tail_{Work::New([] {})};
+  std::atomic<Work*> tail_{Work::New(::operator new(kAllocSize), [] {})};
 };
 
 }  // namespace romkatv
