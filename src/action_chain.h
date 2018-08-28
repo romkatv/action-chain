@@ -29,7 +29,7 @@ class ActionChain {
   //
   // Actions are guaranteed to run in the same order they were added.
   template <class F>
-  void Add(F&& action) {
+  void Run(F&& action) {
     Work* work = Work::New(std::forward<F>(action));
     tail_.exchange(work, std::memory_order_acq_rel)->ContinueWith(work);
   }
@@ -51,7 +51,7 @@ class ActionChain {
     // Called exactly once.
     void Destroy() {
       assert(next_.load(std::memory_order_relaxed) == Sealed());
-      size_t size = *Trailer<size_t>();
+      std::size_t size = *Trailer<std::size_t>();
       this->~Work();
       ::operator delete(this, size);
     }
@@ -86,7 +86,9 @@ class ActionChain {
 
     static Work* Sealed() { return reinterpret_cast<Work*>(alignof(std::max_align_t)); }
 
-    static constexpr size_t Align(size_t n) { return n + (-n & (alignof(std::max_align_t) - 1)); }
+    static constexpr std::size_t Align(std::size_t n) {
+      return n + (-n & (alignof(std::max_align_t) - 1));
+    }
 
     template <class T>
     T* Trailer() {
@@ -94,7 +96,7 @@ class ActionChain {
     }
 
     template <class F>
-    static constexpr size_t AllocSize() {
+    static constexpr std::size_t AllocSize() {
       return Align(sizeof(Work)) + Align(sizeof(F));
     }
 
@@ -104,7 +106,7 @@ class ActionChain {
       F& f = *w->Trailer<F>();
       std::move(f)();
       f.~F();
-      *w->Trailer<size_t>() = AllocSize<F>();
+      *w->Trailer<std::size_t>() = AllocSize<F>();
     }
 
     std::atomic<Work*> next_{nullptr};
