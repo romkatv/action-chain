@@ -113,7 +113,7 @@ class ActionChain {
     }
 
     // TODO: Move the loop into an out-of-line function and leave only the hot path
-    // in there.
+    // in here.
     static void RunAll(Work* w) {
       assert(w != nullptr && w != Sealed());
       while (true) {
