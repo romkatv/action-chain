@@ -1,5 +1,3 @@
-// TODO: Figure out whether memory order constraints can be relaxed.
-
 #ifndef ROMKATV_ACTION_CHAIN_ACTION_CHAIN_H_
 #define ROMKATV_ACTION_CHAIN_ACTION_CHAIN_H
 
@@ -16,6 +14,9 @@
 
 namespace romkatv {
 
+// Wait-free queue of actions. Can be used as an alternative to locking.
+//
+// TODO: Figure out whether memory order constraints can be relaxed.
 class ActionChain {
  public:
   ActionChain() { tail_.load()->Run(); }
@@ -48,37 +49,34 @@ class ActionChain {
       return w;
     }
 
+    // Called exactly once.
     void Destroy() {
+      assert(next_.load(std::memory_order_relaxed) == Sealed());
       size_t size = *Trailer<size_t>();
       this->~Work();
       ::operator delete(this, size);
     }
 
-    // Called at most once.
+    // Called exactly once for every instance of Work except the very last one.
     void ContinueWith(Work* next) {
       // Invariant: _next is either null or sealed.
       if (Work* w = next_.exchange(next, std::memory_order_acq_rel)) {
         static_cast<void>(w);
         assert(w == Sealed());
         Destroy();
-        next->Run();
+        while ((next = next->Run())) {}
       }
     }
 
-    // Called at most once.
-    void Run() {
-      Work* w = this;
-      while (true) {
-        (w->invoke_)(w);
-        // Invariant: w->_next is not sealed.
-        if (Work* next = w->next_.exchange(Sealed(), std::memory_order_acq_rel)) {
-          assert(next != Sealed());
-          w->Destroy();
-          w = next;
-        } else {
-          break;
-        }
+    // Called exactly once.
+    Work* Run() {
+      invoke_(this);
+      Work* next = next_.exchange(Sealed(), std::memory_order_acq_rel);
+      if (next) {
+        assert(next != Sealed());
+        Destroy();
       }
+      return next;
     }
 
    private:
@@ -93,17 +91,18 @@ class ActionChain {
     }
 
     template <class F>
-    static size_t AllocSize() {
+    static constexpr size_t AllocSize() {
       constexpr size_t S = std::max(sizeof(F), sizeof(size_t));
       constexpr size_t A = std::max(alignof(F), alignof(size_t));
       constexpr size_t P = A > alignof(Work) ? A - alignof(Work) : 0;
       return sizeof(Work) + P + S;
     }
 
+    // Called exactly once.
     template <class F>
     static void Invoke(Work* w) {
       F* f = w->Trailer<F>();
-      std::move (*f)();
+      std::move(*f)();
       f->~F();
       *w->Trailer<size_t>() = AllocSize<F>();
     }

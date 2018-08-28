@@ -23,7 +23,8 @@ int main() {
     for (size_t i = 0; i != kThreads; ++i) {
       threads.emplace_back([&] {
         for (size_t i = 0; i != kActionsPerThread; ++i) {
-          action_chain.Add([&] { ++counter; });
+          auto f = [&] { ++counter; };
+          action_chain.Add(f);
         }
       });
     }
