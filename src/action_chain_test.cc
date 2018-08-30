@@ -23,7 +23,7 @@
 //
 //   K  multiply by 2^10
 //   M  multiply by 2^20
-//   M  multiply by 2^30
+//   G  multiply by 2^30
 
 #include "action_chain.h"
 
