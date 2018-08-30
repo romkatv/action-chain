@@ -107,14 +107,16 @@ class ActionChain {
 
     // Called exactly once.
     void Destroy() {
-      assert(next_.load(std::memory_order_relaxed) == Sealed());
+      assert(next_.load(std::memory_order_relaxed) != nullptr);
       this->~Work();
     }
 
     // Called exactly once for every instance of Work except the very last one.
     // Returns null or raw memory of kAllocSize bytes.
     void* ContinueWith(Work* next) {
-      if (Work* w = next_.exchange(next, std::memory_order_acq_rel)) {
+      assert(next != nullptr && next != Sealed());
+      if (Work* w = next_.load(std::memory_order_acquire)
+                        ?: next_.exchange(next, std::memory_order_acq_rel)) {
         static_cast<void>(w);
         assert(w == Sealed());
         Destroy();
@@ -127,8 +129,8 @@ class ActionChain {
     // TODO: Move the loop into an out-of-line function and leave only the hot path
     // in here.
     static void RunAll(Work* w) {
-      assert(w != nullptr && w != Sealed());
       while (true) {
+        assert(w != nullptr && w != Sealed());
         w->invoke_(w);
         if (Work* next = w->next_.exchange(Sealed(), std::memory_order_acq_rel)) {
           assert(next != Sealed());
@@ -148,6 +150,7 @@ class ActionChain {
     // Called exactly once.
     template <class F>
     static void Invoke(Work* w) {
+      assert(w != nullptr && w != Sealed());
       F& f = *reinterpret_cast<F*>(w + 1);
       std::move(f)();
       f.~F();
@@ -158,7 +161,7 @@ class ActionChain {
   };
 
   static thread_local Mem mem_;
-  
+
   std::atomic<Work*> tail_{Work::New(::operator new(kAllocSize), [] {})};
 };
 
