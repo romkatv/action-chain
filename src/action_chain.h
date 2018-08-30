@@ -115,7 +115,7 @@ class ActionChain {
     // Returns null or raw memory of kAllocSize bytes.
     void* ContinueWith(Work* next) {
       assert(next != nullptr && next != Sealed());
-      if (Work* w = next_.load(std::memory_order_acq_rel)
+      if (Work* w = next_.load(std::memory_order_acquire)
                         ?: next_.exchange(next, std::memory_order_acq_rel)) {
         static_cast<void>(w);
         assert(w == Sealed());
