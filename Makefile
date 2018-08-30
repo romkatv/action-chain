@@ -1,7 +1,7 @@
 appname := action_chain_test
 
 CXX := g++
-CXXFLAGS := -std=c++17 -fno-exceptions -Wall -Werror -g -DNDEBUG -O2
+CXXFLAGS := -std=c++17 -fno-exceptions -Wall -Werror -g -DNDEBUG -O3
 LDFLAGS := -pthread
 
 SRCS := $(shell find src -name "*.cc")

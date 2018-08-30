@@ -115,7 +115,7 @@ class ActionChain {
     // Returns null or raw memory of kAllocSize bytes.
     void* ContinueWith(Work* next) {
       assert(next != nullptr && next != Sealed());
-      if (Work* w = next_.load(std::memory_order_acquire)
+      if (Work* w = next_.load(std::memory_order_acq_rel)
                         ?: next_.exchange(next, std::memory_order_acq_rel)) {
         static_cast<void>(w);
         assert(w == Sealed());
@@ -126,20 +126,12 @@ class ActionChain {
       return nullptr;
     }
 
-    // TODO: Move the loop into an out-of-line function and leave only the hot path
-    // in here.
     static void RunAll(Work* w) {
-      while (true) {
-        assert(w != nullptr && w != Sealed());
-        w->invoke_(w);
-        if (Work* next = w->next_.exchange(Sealed(), std::memory_order_acq_rel)) {
-          assert(next != Sealed());
-          w->Destroy();
-          ::operator delete(w, 64);
-          w = next;
-        } else {
-          break;
-        }
+      assert(w != nullptr && w != Sealed());
+      w->invoke_(w);
+      if (Work* next = w->next_.exchange(Sealed(), std::memory_order_acq_rel)) {
+        assert(next != Sealed());
+        RunAllSlow(w, next);
       }
     }
 
@@ -147,6 +139,8 @@ class ActionChain {
     Work() {}
 
     static Work* Sealed() { return reinterpret_cast<Work*>(alignof(Work)); }
+
+    static void RunAllSlow(Work* w, Work* next);
 
     // Called exactly once.
     template <class F>
