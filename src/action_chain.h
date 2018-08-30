@@ -83,10 +83,8 @@ class ActionChain {
   }
 
   template <class F>
-  Mem Run(F&& action) {
-    Mem mem;
-    Run(&mem, std::move(action));
-    return mem;
+  void Run(F&& action) {
+    Run(&mem_, std::forward<F>(action));
   }
 
  private:
@@ -159,6 +157,8 @@ class ActionChain {
     void (*invoke_)(Work*);
   };
 
+  static thread_local Mem mem_;
+  
   std::atomic<Work*> tail_{Work::New(::operator new(kAllocSize), [] {})};
 };
 

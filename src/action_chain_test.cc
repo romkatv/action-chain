@@ -14,8 +14,8 @@
 //
 //   ActionChain           ActionChain class from this library with explicit Mem
 //                         passing by the caller
-//   ActionChainNoPooling  ActionChain class from this library without explicit
-//                         Mem passing by the caller
+//   ActionChainTLS        ActionChain class from this library with implicit Mem
+//                         passing via TLS
 //   CriticalSection       regular mutex
 //   Unsynchronized        no synchronization; set --threads=1 when you use this
 //
@@ -116,7 +116,7 @@ Flags ParseFlags(const char* const* begin, const char* const* end) {
   return res;
 }
 
-class ActionChainNoPooling {
+class ActionChainTLS {
  public:
   using Mem = int;
 
@@ -228,7 +228,7 @@ int BenchmarkMain(int argc, char* argv[]) {
   Flags flags = ParseFlags(argv + 1, argv + argc);
   std::unordered_map<std::string, int (*)(const Flags&)> bm = {
       {"ActionChain", Benchmark<ActionChain>},
-      {"ActionChainNoPooling", Benchmark<ActionChainNoPooling>},
+      {"ActionChainTLS", Benchmark<ActionChainTLS>},
       {"CriticalSection", Benchmark<CriticalSection>},
       {"Unsynchronized", Benchmark<Unsynchronized>},
   };
