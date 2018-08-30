@@ -135,6 +135,7 @@ class ActionChain {
         if (Work* next = w->next_.exchange(Sealed(), std::memory_order_acq_rel)) {
           assert(next != Sealed());
           w->Destroy();
+          ::operator delete(w, 64);
           w = next;
         } else {
           break;
