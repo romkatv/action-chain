@@ -165,25 +165,14 @@ int Benchmark(const Flags& flags) {
   const std::uint64_t actions_per_thread = flags.actions / flags.threads;
   CHECK(actions_per_thread * flags.threads == flags.actions);
 
-  auto Out = []() -> std::ostream& { return std::cout << std::setw(28) << std::left; };
-
-  auto PrintNum = [&](const char* name, std::uint64_t val) {
-    auto Try = [&](int shift, const char* suffix) {
-      if ((val >> shift << shift) != val) return false;
-      std::cout << (val >> shift) << suffix << std::endl;
-      return true;
-    };
-    Out() << name;
-    if (!Try(30, "G") && !Try(20, "M") && !Try(10, "K")) {
-      std::cout << val << std::endl;
-    }
+  auto PrintCol = [](const char* name, const auto& val) {
+    std::cout << name << '=' << std::setw(17) << std::setprecision(3) << std::left << val;
   };
 
-  Out() << "Synchronization primitive" << flags.sync << std::endl;
-  PrintNum("Threads", flags.threads);
-  PrintNum("Ops per action", flags.ops_per_action);
-  PrintNum("Actions", flags.actions);
-  PrintNum("Actions per thread", actions_per_thread);
+  PrintCol("sync", flags.sync);
+  PrintCol("threads", flags.threads);
+  PrintCol("ops-per-action", flags.ops_per_action);
+  std::cout << std::flush;
 
   volatile std::uint64_t counter = 0;
   auto wall_time_start = std::chrono::high_resolution_clock::now();
@@ -214,12 +203,10 @@ int Benchmark(const Flags& flags) {
 
   double wall = std::chrono::duration<double>(wall_time_end - wall_time_start).count();
   double cpu = cpu_time_end - cpu_time_start;
-  Out() << "Total wall time (s)" << wall << std::endl;
-  Out() << "Actions per wall second" << flags.actions / wall << std::endl;
-  Out() << "Wall time per action (ns)" << 1e9 * wall / flags.actions << std::endl;
-  Out() << "Total CPU time (s)" << cpu << std::endl;
-  Out() << "Actions per CPU second" << flags.actions / cpu << std::endl;
-  Out() << "CPU time per action (ns)" << 1e9 * cpu / flags.actions << std::endl;
+  PrintCol("total-wall-time(s)", wall);
+  PrintCol("wall-time-per-action(ns)", 1e9 * wall / flags.actions);
+  PrintCol("cpu-time-per-action(ns)", 1e9 * cpu / flags.actions);
+  std::cout << std::endl;
 
   return 0;
 }
