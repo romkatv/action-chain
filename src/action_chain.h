@@ -88,7 +88,7 @@ class ActionChain {
   }
 
  private:
-  static constexpr std::size_t kAllocSize = 64;
+  static constexpr std::size_t kAllocSize = 32;
 
   class Work {
    public:
