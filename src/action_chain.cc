@@ -10,7 +10,7 @@ void ActionChain::Work::RunAllSlow(Work* w, Work* next) {
       assert(w != nullptr && w != Sealed());
       assert(next != nullptr && next != Sealed());
       w->Destroy();
-      ::operator delete(w, 64);
+      ::operator delete(w, kAllocSize);
       w = next;
       w->invoke_(w);
       next = w->next_.load(std::memory_order_acquire);
